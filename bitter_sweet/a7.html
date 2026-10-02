@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星際守衛｜太空射擊</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; color: #e8f7ff; background: radial-gradient(ellipse at 50% 100%, #18244c, #060914 65%); font-family: system-ui, sans-serif; }
+        .game { width: min(100%, 760px); }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 12px; }
+        h1 { margin: 0; font-size: clamp(1.25rem, 4vw, 1.8rem); letter-spacing: .12em; color: #8deaff; text-shadow: 0 0 18px #27bfff; }
+        .stats { display: flex; gap: 18px; font-weight: 700; }
+        .stats span { color: #91eaff; }
+        button { cursor: pointer; }
+        #sound { border: 1px solid #3d81a5; background: #10223a; color: #d8f7ff; padding: 8px 12px; border-radius: 8px; }
+        .stage { position: relative; }
+        canvas { display: block; width: 100%; height: min(68vh, 560px); min-height: 360px; border: 1px solid #315776; border-radius: 12px; background: #050914; box-shadow: 0 0 35px #0876a633; touch-action: none; }
+        .help { text-align: center; color: #aabbd0; font-size: .9rem; margin: 12px 0 0; }
+        .message { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; text-align: center; padding: 20px; background: #030713b8; border-radius: 12px; }
+        .message h2 { margin: 0 0 8px; color: #8deaff; font-size: 2rem; }
+        .message p { margin: 0 0 16px; }
+        .message button { border: 0; border-radius: 999px; padding: 11px 24px; color: #06101c; background: #74e6ff; font-weight: 800; }
+        .hidden { display: none; }
+        @media (max-width: 480px) { header { flex-wrap: wrap; } .stats { order: 3; width: 100%; justify-content: space-between; } }
+    </style>
+</head>
+<body>
+    <main class="game">
+        <header>
+            <h1>✦ 星際守衛 ✦</h1>
+            <div class="stats"><div>分數 <span id="score">0</span></div><div>生命 <span id="lives">♥♥♥</span></div></div>
+            <button id="sound" type="button" aria-pressed="true">🔊 音效：開</button>
+        </header>
+        <div class="stage">
+            <canvas id="game" aria-label="太空射擊遊戲畫面"></canvas>
+            <section class="message" id="message">
+                <h2 id="headline">準備出擊！</h2>
+                <p id="instructions">移動戰機躲避敵人，發射雷射保衛星系。</p>
+                <button id="start" type="button">開始遊戲</button>
+            </section>
+        </div>
+        <p class="help">電腦：← → 或 A / D 移動，空白鍵射擊　・　手機：在畫面上拖曳戰機並自動射擊</p>
+    </main>
+    <script>
+        (() => {
+            const canvas = document.getElementById('game');
+            const ctx = canvas.getContext('2d');
+            const scoreNode = document.getElementById('score');
+            const livesNode = document.getElementById('lives');
+            const overlay = document.getElementById('message');
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            let audioContext, soundOn = true, running = false, score = 0, lives = 3;
+            let player, bullets = [], enemies = [], stars = [], keys = {}, lastShot = 0, lastSpawn = 0, previous = 0, animation;
+
+            function resize() {
+                const rect = canvas.getBoundingClientRect();
+                const ratio = window.devicePixelRatio || 1;
+                canvas.width = Math.round(rect.width * ratio);
+                canvas.height = Math.round(rect.height * ratio);
+                ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+                if (player) player.x = Math.max(18, Math.min(rect.width - 18, player.x));
+                stars = Array.from({ length: 85 }, () => ({ x: Math.random() * rect.width, y: Math.random() * rect.height, speed: 15 + Math.random() * 65, size: Math.random() * 1.8 + .4 }));
+            }
+            function tone(freq, duration, type = 'sine', volume = .045) {
+                if (!soundOn || !AudioContextClass) return;
+                try {
+                    audioContext ||= new AudioContextClass();
+                    if (audioContext.state === 'suspended') audioContext.resume();
+                    const osc = audioContext.createOscillator(), gain = audioContext.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, audioContext.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(Math.max(50, freq * .45), audioContext.currentTime + duration);
+                    gain.gain.setValueAtTime(volume, audioContext.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(.001, audioContext.currentTime + duration);
+                    osc.connect(gain).connect(audioContext.destination);
+                    osc.start(); osc.stop(audioContext.currentTime + duration);
+                } catch (_) { /* 音效不可用時仍可遊玩 */ }
+            }
+            function startGame() {
+                const rect = canvas.getBoundingClientRect();
+                score = 0; lives = 3; bullets = []; enemies = []; lastShot = 0; lastSpawn = 0;
+                player = { x: rect.width / 2, y: rect.height - 48, speed: 340 };
+                scoreNode.textContent = score; livesNode.textContent = '♥♥♥';
+                document.getElementById('headline').textContent = '準備出擊！';
+                document.getElementById('instructions').textContent = '移動戰機躲避敵人，發射雷射保衛星系。';
+                document.getElementById('start').textContent = '開始遊戲';
+                overlay.classList.add('hidden'); running = true; previous = performance.now();
+                if (animation) cancelAnimationFrame(animation);
+                animation = requestAnimationFrame(loop);
+            }
+            function endGame() {
+                running = false;
+                document.getElementById('headline').textContent = '任務結束';
+                document.getElementById('instructions').textContent = `你守住了星系，獲得 ${score} 分！`;
+                document.getElementById('start').textContent = '再玩一次';
+                overlay.classList.remove('hidden');
+                tone(180, .45, 'sawtooth', .07);
+            }
+            function drawShip(x, y) {
+                ctx.save(); ctx.translate(x, y);
+                ctx.fillStyle = '#73eaff'; ctx.shadowColor = '#33cfff'; ctx.shadowBlur = 18;
+                ctx.beginPath(); ctx.moveTo(0, -19); ctx.lineTo(15, 14); ctx.lineTo(0, 8); ctx.lineTo(-15, 14); ctx.closePath(); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+            function loop(now) {
+                if (!running) return;
+                const dt = Math.min((now - previous) / 1000, .04); previous = now;
+                const w = canvas.clientWidth, h = canvas.clientHeight;
+                ctx.clearRect(0, 0, w, h);
+                ctx.fillStyle = '#d8edff';
+                for (const star of stars) { star.y += star.speed * dt; if (star.y > h) { star.y = 0; star.x = Math.random() * w; } ctx.globalAlpha = .35 + star.size / 3; ctx.fillRect(star.x, star.y, star.size, star.size); }
+                ctx.globalAlpha = 1;
+                if (keys.ArrowLeft || keys.a || keys.A) player.x -= player.speed * dt;
+                if (keys.ArrowRight || keys.d || keys.D) player.x += player.speed * dt;
+                player.x = Math.max(18, Math.min(w - 18, player.x));
+                if ((keys[' '] || keys.Spacebar) && now - lastShot > 230) { bullets.push({ x: player.x, y: player.y - 17 }); lastShot = now; tone(760, .1, 'square', .025); }
+                if (now - lastSpawn > Math.max(340, 900 - score * 3)) { enemies.push({ x: 20 + Math.random() * Math.max(1, w - 40), y: -20, speed: 85 + Math.random() * 75 + score * .4, r: 12 }); lastSpawn = now; }
+                for (let i = bullets.length - 1; i >= 0; i--) { const b = bullets[i]; b.y -= 470 * dt; ctx.fillStyle = '#a7f5ff'; ctx.shadowColor = '#24dfff'; ctx.shadowBlur = 12; ctx.fillRect(b.x - 2, b.y - 9, 4, 13); ctx.shadowBlur = 0; if (b.y < -15) bullets.splice(i, 1); }
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const enemy = enemies[i]; enemy.y += enemy.speed * dt;
+                    ctx.fillStyle = '#ff657f'; ctx.shadowColor = '#ff3358'; ctx.shadowBlur = 14;
+                    ctx.beginPath(); ctx.moveTo(enemy.x, enemy.y - enemy.r); ctx.lineTo(enemy.x + enemy.r, enemy.y); ctx.lineTo(enemy.x, enemy.y + enemy.r); ctx.lineTo(enemy.x - enemy.r, enemy.y); ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0;
+                    let hit = false;
+                    for (let j = bullets.length - 1; j >= 0; j--) if (Math.hypot(bullets[j].x - enemy.x, bullets[j].y - enemy.y) < enemy.r + 5) { bullets.splice(j, 1); hit = true; break; }
+                    if (hit) { enemies.splice(i, 1); score += 10; scoreNode.textContent = score; tone(330, .18, 'triangle', .06); continue; }
+                    if (Math.hypot(player.x - enemy.x, player.y - enemy.y) < enemy.r + 13) { enemies.splice(i, 1); lives--; livesNode.textContent = '♥'.repeat(lives) || '—'; tone(120, .25, 'sawtooth', .07); if (!lives) { endGame(); return; } }
+                    else if (enemy.y > h + 20) { enemies.splice(i, 1); lives--; livesNode.textContent = '♥'.repeat(lives) || '—'; if (!lives) { endGame(); return; } }
+                }
+                drawShip(player.x, player.y);
+                animation = requestAnimationFrame(loop);
+            }
+            document.getElementById('start').addEventListener('click', startGame);
+            document.getElementById('sound').addEventListener('click', event => { soundOn = !soundOn; event.currentTarget.textContent = soundOn ? '🔊 音效：開' : '🔇 音效：關'; event.currentTarget.setAttribute('aria-pressed', String(soundOn)); if (soundOn) tone(520, .12); });
+            window.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight', ' '].includes(event.key)) event.preventDefault(); keys[event.key] = true; });
+            window.addEventListener('keyup', event => { keys[event.key] = false; });
+            canvas.addEventListener('pointermove', event => { if (running && event.buttons) { const rect = canvas.getBoundingClientRect(); player.x = event.clientX - rect.left; keys[' '] = true; } });
+            canvas.addEventListener('pointerdown', event => { if (running) { const rect = canvas.getBoundingClientRect(); player.x = event.clientX - rect.left; keys[' '] = true; } });
+            canvas.addEventListener('pointerup', () => { keys[' '] = false; });
+            canvas.addEventListener('pointercancel', () => { keys[' '] = false; });
+            window.addEventListener('resize', resize);
+            resize();
+        })();
+    </script>
+</body>
+</html>
