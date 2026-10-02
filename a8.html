@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#11131f">
+    <title>霓虹彈珠｜打磚塊</title>
+    <style>
+        :root { color-scheme: dark; --ink: #11131f; --paper: #fcf6e9; --muted: #a8a5b6; --lime: #cbff50; --pink: #ff5c9b; --cyan: #59e8ff; }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; color: var(--paper); background: radial-gradient(ellipse at 50% 4%, #352747 0, #191624 42%, #10121c 78%); font-family: "Trebuchet MS", "Microsoft JhengHei", sans-serif; }
+        .game { width: min(100%, 900px); }
+        .topline { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+        .mark { color: var(--lime); font-size: 12px; font-weight: 900; letter-spacing: 2px; }
+        h1 { margin: 0; font-size: clamp(22px, 5vw, 34px); line-height: 1; font-weight: 900; }
+        h1 span { color: var(--pink); }
+        .subtitle { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+        .topline-copy { flex: 1; }
+        button { font: inherit; cursor: pointer; }
+        #sound { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid #514858; border-radius: 50%; color: var(--paper); background: #24212f; font-size: 18px; }
+        #sound:hover { border-color: var(--lime); color: var(--lime); }
+        .hud { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: 10px; border: 1px solid #393443; border-radius: 10px; overflow: hidden; background: #1a1824; }
+        .stat { padding: 10px 16px; border-right: 1px solid #393443; }
+        .stat:last-child { border: 0; }
+        .label { display: block; margin-bottom: 3px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 1.5px; }
+        .value { color: var(--lime); font-size: 18px; font-weight: 900; }
+        .stage { position: relative; overflow: hidden; border: 1px solid #504452; border-radius: 12px; background: #14131e; box-shadow: 0 22px 80px #0008, 0 0 40px #ff5c9b12; }
+        canvas { display: block; width: 100%; height: min(65vh, 570px); min-height: 360px; touch-action: none; }
+        .message { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 11px; padding: 24px; text-align: center; background: #11111bcc; backdrop-filter: blur(5px); }
+        .message.hidden { display: none; }
+        .message .kicker { color: var(--lime); font-size: 11px; font-weight: 900; letter-spacing: 3px; }
+        .message h2 { margin: 0; font-size: clamp(32px, 8vw, 54px); font-weight: 1000; line-height: 1; }
+        .message p { margin: 0 0 8px; color: #d0c9d3; font-size: 14px; }
+        #start { padding: 12px 27px; border: 0; border-radius: 999px; color: #171421; background: var(--lime); box-shadow: 0 5px 0 #82aa28; font-weight: 900; }
+        #start:hover { transform: translateY(-1px); filter: brightness(1.08); }
+        .help { display: flex; justify-content: space-between; gap: 12px; margin: 11px 2px 0; color: var(--muted); font-size: 12px; }
+        .help strong { color: var(--cyan); }
+        @media (max-width: 520px) { body { padding: 16px 12px; } canvas { min-height: 420px; height: 62vh; } .help { flex-direction: column; gap: 5px; } .stat { padding: 9px 11px; } }
+        @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+    </style>
+</head>
+<body>
+    <main class="game">
+        <header class="topline">
+            <div class="topline-copy">
+                <div class="mark">ARCADE 08 / NEON BREAKER</div>
+                <h1>霓虹<span>彈珠</span></h1>
+                <p class="subtitle">瞄準、反彈、清空整面彩色磚塊。</p>
+            </div>
+            <button id="sound" type="button" aria-label="關閉音效" aria-pressed="true" title="音效開關">♫</button>
+        </header>
+        <section class="hud" aria-label="遊戲狀態">
+            <div class="stat"><span class="label">SCORE</span><span class="value" id="score">00000</span></div>
+            <div class="stat"><span class="label">LIVES</span><span class="value" id="lives">♥ ♥ ♥</span></div>
+            <div class="stat"><span class="label">LEVEL</span><span class="value" id="level">01</span></div>
+        </section>
+        <div class="stage">
+            <canvas id="board" aria-label="霓虹彈珠打磚塊遊戲畫面"></canvas>
+            <section class="message" id="message">
+                <div class="kicker">READY PLAYER ONE</div>
+                <h2 id="headline">打出你的節奏</h2>
+                <p id="instructions">讓彈珠留在場上，擊碎每一塊霓虹磚。</p>
+                <button id="start" type="button">開始遊戲　↗</button>
+            </section>
+        </div>
+        <footer class="help"><span>移動：<strong>← →</strong> 或 <strong>A / D</strong>・滑鼠／觸控拖曳</span><span>音效會依彈珠位置呈現 3D 左右與遠近感</span></footer>
+    </main>
+    <script>
+        (() => {
+            const canvas = document.getElementById('board');
+            const ctx = canvas.getContext('2d');
+            const scoreNode = document.getElementById('score');
+            const livesNode = document.getElementById('lives');
+            const levelNode = document.getElementById('level');
+            const overlay = document.getElementById('message');
+            const audioClass = window.AudioContext || window.webkitAudioContext;
+            const colors = ['#ff5c9b', '#ffad4d', '#f7ed5c', '#cbff50', '#59e8ff', '#9d83ff'];
+            let audio, soundOn = true, running = false, score = 0, lives = 3, level = 1;
+            let width = 0, height = 0, paddle, ball, bricks = [], keys = {}, previous = 0, animation;
+
+            function resize() {
+                const rect = canvas.getBoundingClientRect();
+                const ratio = window.devicePixelRatio || 1;
+                width = rect.width; height = rect.height;
+                canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
+                ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+                paddle = paddle || { x: width / 2, y: height - 34, w: 112, h: 12, speed: 540 };
+                paddle.y = height - 34;
+                paddle.x = Math.max(paddle.w / 2, Math.min(width - paddle.w / 2, paddle.x));
+                if (ball) ball.y = Math.min(ball.y, height - 65);
+                if (!bricks.length) makeBricks();
+                if (!running) draw();
+            }
+            function makeBricks() {
+                const columns = 9, rows = Math.min(4 + level, 7), gap = 7, side = 22;
+                const brickW = (width - side * 2 - gap * (columns - 1)) / columns, brickH = 18;
+                bricks = [];
+                for (let row = 0; row < rows; row++) for (let col = 0; col < columns; col++) {
+                    bricks.push({ x: side + col * (brickW + gap), y: 34 + row * (brickH + gap), w: brickW, h: brickH, color: colors[(row + level - 1) % colors.length], alive: true });
+                }
+            }
+            function spatialTone(freq, duration, type, x, y, volume = .06) {
+                if (!soundOn || !audioClass) return;
+                try {
+                    audio ||= new audioClass();
+                    if (audio.state === 'suspended') audio.resume();
+                    const oscillator = audio.createOscillator(), gain = audio.createGain(), panner = audio.createPanner();
+                    panner.panningModel = 'HRTF'; panner.distanceModel = 'inverse'; panner.refDistance = 1; panner.maxDistance = 12; panner.rolloffFactor = 1.15;
+                    const panX = (x / width - .5) * 4;
+                    const depth = -1 - (y / height) * 7;
+                    if (panner.positionX) { panner.positionX.value = panX; panner.positionY.value = 0; panner.positionZ.value = depth; }
+                    else panner.setPosition(panX, 0, depth);
+                    oscillator.type = type; oscillator.frequency.setValueAtTime(freq, audio.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(Math.max(55, freq * .48), audio.currentTime + duration);
+                    gain.gain.setValueAtTime(volume, audio.currentTime); gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime + duration);
+                    oscillator.connect(gain).connect(panner).connect(audio.destination);
+                    oscillator.start(); oscillator.stop(audio.currentTime + duration);
+                } catch (_) { /* 音效不可用時仍可遊玩 */ }
+            }
+            function resetBall() {
+                ball = { x: paddle.x, y: paddle.y - 19, r: 8, vx: (Math.random() > .5 ? 1 : -1) * (165 + level * 12), vy: -(285 + level * 14), trail: [] };
+            }
+            function startGame() {
+                score = 0; lives = 3; level = 1;
+                paddle = { x: width / 2, y: height - 34, w: Math.min(112, width * .28), h: 12, speed: 540 };
+                makeBricks(); resetBall(); updateHud();
+                overlay.classList.add('hidden'); running = true; previous = performance.now();
+                if (animation) cancelAnimationFrame(animation);
+                spatialTone(520, .18, 'triangle', ball.x, ball.y, .08);
+                animation = requestAnimationFrame(loop);
+            }
+            function endGame(won) {
+                running = false;
+                document.getElementById('headline').textContent = won ? '漂亮清場！' : '再來一局？';
+                document.getElementById('instructions').textContent = `最終分數 ${String(score).padStart(5, '0')}　・　抵達第 ${String(level).padStart(2, '0')} 關`;
+                document.querySelector('.kicker').textContent = won ? 'ALL BRICKS CLEARED' : 'GAME OVER';
+                document.getElementById('start').textContent = '再玩一次　↗';
+                overlay.classList.remove('hidden');
+                if (!won) spatialTone(145, .48, 'sawtooth', ball.x, ball.y, .1);
+                draw();
+            }
+            function updateHud() {
+                scoreNode.textContent = String(score).padStart(5, '0');
+                livesNode.textContent = Array.from({ length: lives }, () => '♥').join(' ') || '—';
+                levelNode.textContent = String(level).padStart(2, '0');
+            }
+            function draw() {
+                ctx.clearRect(0, 0, width, height);
+                ctx.fillStyle = '#15131f'; ctx.fillRect(0, 0, width, height);
+                ctx.strokeStyle = '#ffffff08'; ctx.lineWidth = 1;
+                for (let x = 0; x < width; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
+                for (let y = 0; y < height; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
+                for (const brick of bricks) if (brick.alive) {
+                    ctx.shadowColor = brick.color; ctx.shadowBlur = 11; ctx.fillStyle = brick.color;
+                    ctx.beginPath(); ctx.roundRect(brick.x, brick.y, brick.w, brick.h, 4); ctx.fill();
+                    ctx.shadowBlur = 0; ctx.fillStyle = '#ffffff40'; ctx.fillRect(brick.x + 5, brick.y + 3, brick.w - 10, 2);
+                }
+                if (!paddle) return;
+                ctx.shadowColor = '#59e8ff'; ctx.shadowBlur = 18; ctx.fillStyle = '#59e8ff';
+                ctx.beginPath(); ctx.roundRect(paddle.x - paddle.w / 2, paddle.y, paddle.w, paddle.h, 7); ctx.fill(); ctx.shadowBlur = 0;
+                if (ball) {
+                    for (let i = 0; i < ball.trail.length; i++) { const dot = ball.trail[i]; ctx.globalAlpha = (i + 1) / ball.trail.length * .28; ctx.fillStyle = '#fff16a'; ctx.beginPath(); ctx.arc(dot.x, dot.y, ball.r * (i + 1) / ball.trail.length, 0, Math.PI * 2); ctx.fill(); }
+                    ctx.globalAlpha = 1; ctx.shadowColor = '#fff16a'; ctx.shadowBlur = 20; ctx.fillStyle = '#fff7ad';
+                    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+                }
+            }
+            function loop(now) {
+                if (!running) return;
+                const dt = Math.min((now - previous) / 1000, .035); previous = now;
+                if (keys.ArrowLeft || keys.a || keys.A) paddle.x -= paddle.speed * dt;
+                if (keys.ArrowRight || keys.d || keys.D) paddle.x += paddle.speed * dt;
+                paddle.x = Math.max(paddle.w / 2, Math.min(width - paddle.w / 2, paddle.x));
+                ball.trail.push({ x: ball.x, y: ball.y }); if (ball.trail.length > 7) ball.trail.shift();
+                ball.x += ball.vx * dt; ball.y += ball.vy * dt;
+                if (ball.x < ball.r) { ball.x = ball.r; ball.vx = Math.abs(ball.vx); spatialTone(420, .07, 'sine', ball.x, ball.y, .025); }
+                if (ball.x > width - ball.r) { ball.x = width - ball.r; ball.vx = -Math.abs(ball.vx); spatialTone(420, .07, 'sine', ball.x, ball.y, .025); }
+                if (ball.y < ball.r) { ball.y = ball.r; ball.vy = Math.abs(ball.vy); spatialTone(470, .07, 'sine', ball.x, ball.y, .025); }
+                if (ball.vy > 0 && ball.y + ball.r >= paddle.y && ball.y < paddle.y + paddle.h && ball.x > paddle.x - paddle.w / 2 && ball.x < paddle.x + paddle.w / 2) {
+                    const impact = (ball.x - paddle.x) / (paddle.w / 2);
+                    ball.y = paddle.y - ball.r; ball.vx = impact * 300; ball.vy = -Math.sqrt(Math.max(180000, (ball.vx ** 2 + ball.vy ** 2)));
+                    spatialTone(580 + Math.abs(impact) * 170, .1, 'triangle', ball.x, ball.y, .055);
+                }
+                for (const brick of bricks) if (brick.alive && ball.x + ball.r > brick.x && ball.x - ball.r < brick.x + brick.w && ball.y + ball.r > brick.y && ball.y - ball.r < brick.y + brick.h) {
+                    brick.alive = false; ball.vy *= -1; score += 100; updateHud();
+                    spatialTone(290 + colors.indexOf(brick.color) * 75, .16, 'sine', brick.x + brick.w / 2, brick.y, .075); break;
+                }
+                if (ball.y > height + ball.r) {
+                    lives--; updateHud(); spatialTone(155, .3, 'sawtooth', ball.x, height, .08);
+                    if (lives <= 0) { endGame(false); return; }
+                    resetBall();
+                }
+                if (bricks.every(brick => !brick.alive)) {
+                    level++; makeBricks(); resetBall(); updateHud(); spatialTone(780, .34, 'triangle', width / 2, 15, .1);
+                }
+                draw(); animation = requestAnimationFrame(loop);
+            }
+            function movePaddle(event) {
+                if (!running) return;
+                const rect = canvas.getBoundingClientRect();
+                paddle.x = Math.max(paddle.w / 2, Math.min(width - paddle.w / 2, event.clientX - rect.left));
+            }
+            document.getElementById('start').addEventListener('click', startGame);
+            document.getElementById('sound').addEventListener('click', event => {
+                soundOn = !soundOn; event.currentTarget.textContent = soundOn ? '♫' : '♪';
+                event.currentTarget.setAttribute('aria-pressed', String(soundOn));
+                event.currentTarget.setAttribute('aria-label', soundOn ? '關閉音效' : '開啟音效');
+                if (soundOn) spatialTone(550, .12, 'sine', width / 2, height / 2);
+            });
+            window.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight'].includes(event.key)) event.preventDefault(); keys[event.key] = true; });
+            window.addEventListener('keyup', event => { keys[event.key] = false; });
+            canvas.addEventListener('pointermove', movePaddle);
+            canvas.addEventListener('pointerdown', movePaddle);
+            window.addEventListener('resize', resize);
+            resize();
+        })();
+    </script>
+</body>
+</html>
